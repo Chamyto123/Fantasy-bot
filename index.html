@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171323">
+  <title>Fantasy Bot RPG</title>
+  <style>
+    :root { color-scheme: dark; --bg:#100d18; --panel:#1b1726; --panel2:#252033; --purple:#a78bfa; --muted:#aaa2b8; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:#f6f1ff; font:16px system-ui,-apple-system,sans-serif; }
+    header { position:sticky; top:0; z-index:2; background:#171323; border-bottom:1px solid #342b45; padding:14px 16px; }
+    .head { max-width:760px; margin:auto; display:flex; align-items:center; gap:12px; }
+    .crest { width:42px; height:42px; display:grid; place-items:center; border-radius:13px; background:#302344; font-size:23px; }
+    h1 { font-size:17px; margin:0; letter-spacing:.3px; }
+    .sub { color:var(--muted); font-size:12px; margin-top:2px; }
+    main { max-width:760px; margin:0 auto; padding:16px 12px 110px; }
+    .notice { border:1px solid #403354; background:#201a2d; color:#d9cafa; padding:11px 13px; border-radius:13px; font-size:13px; margin-bottom:16px; }
+    #chat { display:flex; flex-direction:column; gap:12px; }
+    .msg { max-width:92%; padding:11px 13px; border-radius:15px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .player { align-self:flex-end; background:#3a2d55; border-bottom-right-radius:5px; }
+    .master { align-self:flex-start; background:var(--panel2); border:1px solid #574273; border-bottom-left-radius:5px; }
+    .name { color:var(--purple); font-weight:700; font-size:11px; letter-spacing:.5px; margin-bottom:5px; }
+    .time { color:#a69caf; font-size:10px; margin-top:7px; text-align:right; }
+    .empty { color:var(--muted); text-align:center; padding:38px 12px; background:var(--panel); border-radius:16px; }
+    .composer-wrap { position:fixed; bottom:0; left:0; right:0; background:#171323; border-top:1px solid #342b45; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); }
+    .composer { max-width:760px; margin:auto; display:flex; gap:8px; }
+    input { min-width:0; border:1px solid #453957; background:#211b2d; color:white; border-radius:12px; padding:12px; font:inherit; outline:none; }
+    #name { width:105px; }
+    #message { flex:1; }
+    button { border:0; border-radius:12px; padding:0 17px; background:var(--purple); color:#1a1228; font-weight:800; font-size:18px; }
+    button:disabled { opacity:.5; }
+    #status { max-width:760px; margin:0 auto 7px; color:var(--muted); font-size:11px; min-height:14px; }
+    @media(max-width:420px) { #name { width:88px; } .composer { gap:6px; } input { padding:11px 9px; font-size:14px; } button { padding:0 13px; } }
+  </style>
+</head>
+<body>
+<header>
+  <div class="head">
+    <div class="crest">⚔️</div>
+    <div>
+      <h1>FANTASY BOT RPG</h1>
+      <div class="sub">Os Reinos Esquecidos · Sala de campanha</div>
+    </div>
+  </div>
+</header>
+<main>
+  <div class="notice">Todos que tiverem este mesmo endereço participam da mesma campanha. Escolham um nome e conversem com o Mestre.</div>
+  <section id="chat">
+    <div class="empty">A taverna está vazia...<br>Seja o primeiro a chamar o Mestre.</div>
+  </section>
+</main>
+<div class="composer-wrap">
+  <div id="status"></div>
+  <form class="composer" id="form">
+    <input id="name" maxlength="24" placeholder="Seu nome" autocomplete="nickname" required>
+    <input id="message" maxlength="1000" placeholder="O que você faz?" autocomplete="off" required>
+    <button id="send" aria-label="Enviar">➤</button>
+  </form>
+</div>
+<script>
+  const chat = document.getElementById('chat');
+  const form = document.getElementById('form');
+  const nameInput = document.getElementById('name');
+  const messageInput = document.getElementById('message');
+  const sendButton = document.getElementById('send');
+  const statusLine = document.getElementById('status');
+  let lastId = 0;
+  let loading = false;
+
+  nameInput.value = localStorage.getItem('fantasyName') || '';
+
+  function addMessage(item) {
+    if (item.id <= lastId) return;
+    const empty = chat.querySelector('.empty');
+    if (empty) empty.remove();
+    const bubble = document.createElement('article');
+    bubble.className = 'msg ' + (item.kind === 'master' ? 'master' : 'player');
+    const who = document.createElement('div');
+    who.className = 'name';
+    who.textContent = item.name;
+    const body = document.createElement('div');
+    body.textContent = item.text;
+    const time = document.createElement('div');
+    time.className = 'time';
+    time.textContent = new Date(item.time).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+    bubble.append(who, body, time);
+    chat.appendChild(bubble);
+    lastId = Math.max(lastId, item.id);
+    window.scrollTo({top:document.body.scrollHeight, behavior:'smooth'});
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch('/api/messages');
+      const data = await res.json();
+      data.messages.forEach(addMessage);
+    } catch (e) {
+      statusLine.textContent = 'Reconectando à sala...';
+    }
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (loading) return;
+    const name = nameInput.value.trim();
+    const message = messageInput.value.trim();
+    if (!name || !message) return;
+    localStorage.setItem('fantasyName', name);
+    loading = true;
+    sendButton.disabled = true;
+    statusLine.textContent = 'Sua mensagem está chegando ao Mestre...';
+    try {
+      const res = await fetch('/api/send', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name, message})
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Não foi possível enviar.');
+      messageInput.value = '';
+      await refresh();
+      statusLine.textContent = '';
+    } catch (e) {
+      statusLine.textContent = e.message;
+    } finally {
+      loading = false;
+      sendButton.disabled = false;
+      messageInput.focus();
+    }
+  });
+
+  refresh();
+  setInterval(refresh, 2500);
+</script>
+</body>
+</html>
